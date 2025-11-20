@@ -1,16 +1,13 @@
-
 import { GoogleGenAI } from "@google/genai";
 import { Dish } from "../types";
 
 let ai: GoogleGenAI | null = null;
 
-// Simple in-memory cache to store generated insights
-// This prevents calling the API again if the user clicks the same dish twice
+// In-memory cache to store generated insights prevents 429 errors by reducing API calls
 const insightCache: Record<string, string> = {};
 
 try {
   // Vite replaces process.env.API_KEY with the actual string literal at build time.
-  // We rely on this replacement, so we don't check typeof process.
   const apiKey = process.env.API_KEY;
   
   if (apiKey) {
@@ -23,7 +20,7 @@ try {
 }
 
 export const getChefInsight = async (dish: Dish): Promise<string> => {
-  // 1. Check Cache First
+  // 1. Check Cache first
   if (insightCache[dish.id]) {
     return insightCache[dish.id];
   }
@@ -50,17 +47,17 @@ export const getChefInsight = async (dish: Dish): Promise<string> => {
     
     // 2. Save to Cache
     insightCache[dish.id] = text;
-    
     return text;
+
   } catch (error: any) {
     console.error("Gemini API error:", error);
     
-    // Handle Rate Limits Gracefully
-    if (error.status === 429 || error.message?.includes('429') || error.status === 'RESOURCE_EXHAUSTED') {
-        // Return a fallback so the UI doesn't break, but don't cache it so we try again later
-        return "The chef is currently busy preparing special orders. (High demand)";
+    // 3. Specific handling for Quota Exceeded (429)
+    if (error?.status === 429 || error?.response?.status === 429 || error?.message?.includes('429')) {
+       // Return a generic high-quality description to mask the error from the user
+       return "This signature dish is crafted with a balance of flavors that our customers love.";
     }
-
+    
     return "This dish is prepared with the finest ingredients and utmost care.";
   }
 };
@@ -81,8 +78,9 @@ export const chatWithRestaurant = async (message: string, history: {role: string
         return response.text || "I'm not sure about that.";
     } catch (e: any) {
         console.error(e);
-        if (e.status === 429 || e.message?.includes('429') || e.status === 'RESOURCE_EXHAUSTED') {
-            return "I'm receiving too many questions right now! Please give me a moment.";
+        // Handle rate limits in chat
+        if (e?.status === 429 || e?.message?.includes('429')) {
+             return "I'm receiving too many questions right now! Please ask me again in a minute.";
         }
         return "I'm having trouble connecting to the kitchen. Ask me again in a moment.";
     }
