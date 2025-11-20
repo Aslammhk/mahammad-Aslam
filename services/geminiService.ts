@@ -1,7 +1,12 @@
+
 import { GoogleGenAI } from "@google/genai";
 import { Dish } from "../types";
 
 let ai: GoogleGenAI | null = null;
+
+// Simple in-memory cache to store generated insights
+// This prevents calling the API again if the user clicks the same dish twice
+const insightCache: Record<string, string> = {};
 
 try {
   // Vite replaces process.env.API_KEY with the actual string literal at build time.
@@ -18,6 +23,11 @@ try {
 }
 
 export const getChefInsight = async (dish: Dish): Promise<string> => {
+  // 1. Check Cache First
+  if (insightCache[dish.id]) {
+    return insightCache[dish.id];
+  }
+
   if (!ai) {
     return "Our chef recommends pairing this with a smile! (AI Key missing)";
   }
@@ -36,9 +46,21 @@ export const getChefInsight = async (dish: Dish): Promise<string> => {
       contents: prompt,
     });
 
-    return response.text || "A delightful choice for any palate.";
-  } catch (error) {
+    const text = response.text || "A delightful choice for any palate.";
+    
+    // 2. Save to Cache
+    insightCache[dish.id] = text;
+    
+    return text;
+  } catch (error: any) {
     console.error("Gemini API error:", error);
+    
+    // Handle Rate Limits Gracefully
+    if (error.status === 429 || error.message?.includes('429') || error.status === 'RESOURCE_EXHAUSTED') {
+        // Return a fallback so the UI doesn't break, but don't cache it so we try again later
+        return "The chef is currently busy preparing special orders. (High demand)";
+    }
+
     return "This dish is prepared with the finest ingredients and utmost care.";
   }
 };
@@ -57,8 +79,11 @@ export const chatWithRestaurant = async (message: string, history: {role: string
 
         const response = await chat.sendMessage({ message });
         return response.text || "I'm not sure about that.";
-    } catch (e) {
+    } catch (e: any) {
         console.error(e);
+        if (e.status === 429 || e.message?.includes('429') || e.status === 'RESOURCE_EXHAUSTED') {
+            return "I'm receiving too many questions right now! Please give me a moment.";
+        }
         return "I'm having trouble connecting to the kitchen. Ask me again in a moment.";
     }
 }
